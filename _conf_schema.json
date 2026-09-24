@@ -1,0 +1,73 @@
+{
+  "owners": {
+    "description": "受管 GitHub 用户名或组织名",
+    "type": "list",
+    "default": ["RioMaker"],
+    "hint": "仅管理已安装且 repo 所属账号在此列表中的插件。不按 author 显示名判断，也不按安装渠道判断。修改后重载。"
+  },
+  "aliases": {
+    "description": "插件查询别名（JSON 对象）",
+    "type": "text",
+    "default": "{\"六爻\": \"astrbot_plugin_liuyao\"}",
+    "hint": "可用插件标识、展示名或不歧义的部分名称查询。此配置用于明确别名映射。"
+  },
+  "repo_overrides": {
+    "description": "缺少仓库信息时的映射（JSON 对象）",
+    "type": "text",
+    "default": "{}",
+    "hint": "例如 {\"astrbot_plugin_ganzhi\":\"RioMaker/astrbot_plugin_ganzhi\"}。只能填写真实仓库；仍须通过 owners 筛选。"
+  },
+  "github_token": {
+    "description": "GitHub 只读 Token（可选）",
+    "type": "string",
+    "default": "",
+    "hint": "公开仓库无需 Token；多个插件的历史查询建议配置以提高额度。私有仓库需要 Contents: Read 权限。勿向群内发送 Token。"
+  },
+  "history_branch": {
+    "description": "历史查询分支",
+    "type": "string",
+    "default": "",
+    "hint": "留空使用各仓库的默认分支；指定值后对所有受管仓库生效。"
+  },
+  "branches": {
+    "description": "允许播报的分支",
+    "type": "list",
+    "default": [],
+    "hint": "留空允许所有分支。标签推送不播报。此项仅控制 Webhook，不影响历史查询分支。"
+  },
+  "webhook_secret": {
+    "description": "GitHub Webhook Secret",
+    "type": "string",
+    "default": "",
+    "hint": "与各仓库 Webhook 中的 Secret 一致。留空不启动 HTTP 监听；历史查询和新增插件提醒仍可用。"
+  },
+  "webhook_host": {
+    "description": "Webhook 监听地址",
+    "type": "string",
+    "default": "127.0.0.1",
+    "hint": "同机反向代理使用默认值。Docker 映射端口时通常需改为 0.0.0.0，并映射 webhook_port。"
+  },
+  "webhook_port": {
+    "description": "Webhook 监听端口",
+    "type": "int",
+    "default": 8765,
+    "hint": "1–65535。修改后重载插件。"
+  },
+  "webhook_path": {
+    "description": "Webhook 接口路径",
+    "type": "string",
+    "default": "/githook/webhook"
+  },
+  "scan_interval": {
+    "description": "已安装插件复查间隔（秒）",
+    "type": "int",
+    "default": 60,
+    "hint": "10–3600 秒。支持加载事件的 AstrBot 会额外即时唤醒检查。首次扫描建立基线，不广播既有插件。"
+  },
+  "max_push_commits": {
+    "description": "每次更新通知展示的提交数",
+    "type": "int",
+    "default": 5,
+    "hint": "1–30 条；历史查询默认仍为最近 30 条。"
+  }
+}
