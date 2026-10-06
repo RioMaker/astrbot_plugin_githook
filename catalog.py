@@ -31,6 +31,12 @@ def owned(repo, owners):
     return bool(repo) and repo.split("/")[0].casefold() in {x.casefold() for x in owners}
 
 
+def plugin_repository(repo, owners):
+    repo = repo_name(repo)
+    name = repo.split("/")[-1].casefold()
+    return owned(repo, owners) and name.startswith("astrbot_plugin_") and name != "astrbot_plugin_"
+
+
 def field(obj, key, default=""):
     return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
 
@@ -47,6 +53,18 @@ class PluginInfo:
 
     def to_dict(self):
         return asdict(self)
+
+
+def repository_info(repo, description=""):
+    return PluginInfo(
+        name=repo,
+        display_name=repo.split("/")[-1],
+        version="未知",
+        repo=repo,
+        status="已发现远端仓库（本机未安装）",
+        description=str(description or ""),
+        installed=False,
+    )
 
 
 def workspace_candidates(manifest, owners):
@@ -131,7 +149,13 @@ def discover(root: Path, stars: list, settings) -> list[PluginInfo]:
             continue
         name = str(metadata.get("name") or folder.name)
         raw_repo = settings.repo_overrides.get(name) or settings.repo_overrides.get(folder.name)
-        repo = repo_name(raw_repo or metadata.get("repo") or git_origin(folder))
+        origin = git_origin(folder)
+        source_repo = (
+            origin or metadata.get("repo")
+            if settings.watch_source == "owner"
+            else metadata.get("repo") or origin
+        )
+        repo = repo_name(raw_repo or source_repo)
         if not owned(repo, settings.owners):
             continue
         star = runtime.get(folder.name) or runtime.get(name)
@@ -165,6 +189,7 @@ def resolve(plugins, query: str, aliases=None):
             plugin.repo.split("/")[-1].casefold(),
         }
         keys.add(plugin.name.removeprefix("astrbot_plugin_").casefold())
+        keys.add(plugin.repo.split("/")[-1].removeprefix("astrbot_plugin_").casefold())
         if query in keys:
             exact.append(plugin)
         elif query and any(query in key for key in keys):

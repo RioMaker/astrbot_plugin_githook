@@ -130,7 +130,14 @@ def test_workspace_http_new_repo_filter_removal_cache_and_restart(monkeypatch, t
         app = web.Application()
         app.router.add_get("/repos/RioMaker/{repo}/contents/{filename}", contents)
         p = main.GithookPlugin(context, config)
-        handler = Webhook(p.settings, p.store, lambda: p.plugins, p._refresh_for_webhook, p.wake)
+        handler = Webhook(
+            p.settings,
+            p.store,
+            lambda: p.plugins,
+            p._refresh_for_webhook,
+            p.wake,
+            is_repo_enabled=p.repo_enabled,
+        )
         app.router.add_post("/hook", handler.handle)
         async with serve(app) as base, aiohttp.ClientSession() as session:
             p.github = GitHubClient(session, p.store, p.settings.github_token, api_base=base)
@@ -176,13 +183,16 @@ def test_workspace_http_new_repo_filter_removal_cache_and_restart(monkeypatch, t
                 await p.refresh()
                 future = next(x for x in p.plugins if x.name == "astrbot_plugin_future")
                 assert not future.installed
-                assert len(p.store.pending()) == 1
-                assert "新增插件" in p.store.pending()[0]["message"]
+                assert p.store.pending() == []
+                assert (await post(future.name, "future-off"))[1]["reason"] == "repository disabled"
+                for row in config["repository_switches"]:
+                    if row["repo"] == future.repo:
+                        row["enabled"] = True
                 assert (await post(future.name, "future-push"))[1]["status"] == "queued"
-                assert len(p.store.pending()) == 2
+                assert len(p.store.pending()) == 1
                 assert p.store.cache_get("webhook:last")[0]["repo"] == future.repo
                 await p.refresh()
-                assert len(p.store.pending()) == 2
+                assert len(p.store.pending()) == 1
 
                 # A failure uses old verified data without making it look freshly verified.
                 key = "workspace-catalog:" + p._scope_key()
@@ -210,7 +220,7 @@ def test_workspace_http_new_repo_filter_removal_cache_and_restart(monkeypatch, t
             await again.refresh()  # No GitHub client: preserve the verified exact snapshot.
             assert [x.name for x in again.plugins] == ["astrbot_plugin_future"]
             assert "旧清单" in again.catalog_status
-            assert len(again.store.pending()) == 2
+            assert len(again.store.pending()) == 1
         finally:
             await again.terminate()
 

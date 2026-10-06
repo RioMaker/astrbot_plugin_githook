@@ -22,7 +22,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS plugins(
                 name TEXT PRIMARY KEY, info TEXT NOT NULL, present INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS deliveries(
-                id TEXT PRIMARY KEY, digest TEXT NOT NULL, created REAL NOT NULL);
+                id TEXT PRIMARY KEY, digest TEXT NOT NULL, created REAL NOT NULL,
+                repo TEXT NOT NULL DEFAULT '');
             CREATE TABLE IF NOT EXISTS outbox(
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 delivery TEXT NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
@@ -38,6 +39,10 @@ class Store:
             CREATE TABLE IF NOT EXISTS api_cache(
                 key TEXT PRIMARY KEY, body TEXT NOT NULL, saved REAL NOT NULL);
         """)
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(deliveries)")}
+        if "repo" not in columns:
+            self.db.execute("ALTER TABLE deliveries ADD COLUMN repo TEXT NOT NULL DEFAULT ''")
+            self.db.commit()
 
     def close(self):
         self.db.close()
@@ -63,14 +68,17 @@ class Store:
     def targets(self):
         return [r[0] for r in self.db.execute("SELECT umo FROM subscriptions ORDER BY umo")]
 
-    def _enqueue(self, delivery, digest, message):
+    def _enqueue(self, delivery, digest, message, repo="", notify=True):
         prior = self.db.execute("SELECT digest FROM deliveries WHERE id=?", (delivery,)).fetchone()
         if prior:
             if prior[0] != digest:
                 raise ValueError("同一个 Delivery ID 对应不同内容")
             return False
-        self.db.execute("INSERT INTO deliveries VALUES (?,?,?)", (delivery, digest, time.time()))
-        for umo in self.targets():
+        self.db.execute(
+            "INSERT INTO deliveries(id,digest,created,repo) VALUES (?,?,?,?)",
+            (delivery, digest, time.time(), repo.casefold()),
+        )
+        for umo in self.targets() if notify else []:
             for part, text in enumerate(chunks(message)):
                 self.db.execute(
                     "INSERT INTO outbox(delivery,umo,part,message) VALUES (?,?,?,?)",
@@ -78,9 +86,9 @@ class Store:
                 )
         return True
 
-    def record_push(self, delivery, digest, message, commits):
+    def record_push(self, delivery, digest, message, commits, repo="", notify=True):
         with self.db:
-            created = self._enqueue(delivery, digest, message)
+            created = self._enqueue(delivery, digest, message, repo, notify)
             if created:
                 self._cache_commits(commits)
         return created
@@ -98,7 +106,25 @@ class Store:
         with self.db:
             self._cache_commits(commits)
 
-    def sync_plugins(self, plugins, owner_key):
+    def known_plugins(self):
+        return [json.loads(row[0]) for row in self.db.execute("SELECT info FROM plugins")]
+
+    def cancel_disabled_repos(self, enabled_repos):
+        enabled_repos = {repo.casefold() for repo in enabled_repos}
+        cancelled = [
+            (row["id"],)
+            for row in self.db.execute(
+                "SELECT id,repo FROM deliveries WHERE id IN (SELECT delivery FROM outbox WHERE status='pending')"
+            )
+            if row["repo"].casefold() not in enabled_repos
+        ]
+        with self.db:
+            self.db.executemany(
+                "UPDATE outbox SET status='cancelled' WHERE delivery=? AND status='pending'",
+                cancelled,
+            )
+
+    def sync_plugins(self, plugins, owner_key, enabled_repos=None):
         """Snapshot + new-install notifications in one transaction; first scan is silent."""
         row = self.db.execute("SELECT value FROM settings WHERE key='owners'").fetchone()
         baseline = row is None or row[0] != owner_key
@@ -119,10 +145,12 @@ class Store:
             self.db.execute("INSERT OR REPLACE INTO settings VALUES ('owners',?)", (owner_key,))
             if not baseline:
                 for plugin in added:
+                    if enabled_repos is not None and plugin.repo.casefold() not in enabled_repos:
+                        continue
                     # Include monotonic ns to support reinstall after an observed removal.
                     identity = f"install:{plugin.name}:{time.time_ns()}"
                     message = f"[githook 新增插件]\n{plugin.display_name}\n版本：{plugin.version}\n状态：{plugin.status}\n仓库：https://github.com/{plugin.repo}"
-                    self._enqueue(identity, identity, message)
+                    self._enqueue(identity, identity, message, plugin.repo)
         return [] if baseline else added
 
     def pending(self, limit=20):
@@ -130,7 +158,8 @@ class Store:
             dict(r)
             for r in self.db.execute(
                 """
-            SELECT o.* FROM outbox o JOIN subscriptions s ON s.umo=o.umo
+            SELECT o.*,d.repo FROM outbox o JOIN subscriptions s ON s.umo=o.umo
+            JOIN deliveries d ON d.id=o.delivery
             WHERE o.status='pending' AND o.next_try<=?
             AND NOT EXISTS (SELECT 1 FROM outbox earlier
                 WHERE earlier.delivery=o.delivery AND earlier.umo=o.umo

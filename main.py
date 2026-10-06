@@ -16,10 +16,19 @@ from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path, get_astrbot_plugin_path
 
-from .catalog import PluginInfo, discover, field, resolve, workspace_candidates
+from .catalog import (
+    PluginInfo,
+    discover,
+    field,
+    plugin_repository,
+    repository_info,
+    resolve,
+    workspace_candidates,
+)
 from .config import Settings
 from .github import GitHubClient, GitHubError, format_history
 from .query import chunks, parse_history
+from .registry import RepositoryRegistry
 from .store import Store
 from .webhook import Webhook
 
@@ -42,16 +51,18 @@ HELP = """githook · 自有插件更新与提交历史
 """
 
 
-@register("astrbot_plugin_githook", "Rio", "工作区插件 GitHub 推送、历史与新增提醒", "0.2.0")
+@register("astrbot_plugin_githook", "Rio", "插件仓库自动发现、勾选推送与历史查询", "0.3.0")
 class GithookPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
         self.settings = Settings.load(config)
+        self.registry = RepositoryRegistry(config)
         self.store = Store(
             Path(get_astrbot_data_path()) / "plugin_data" / "astrbot_plugin_githook" / "githook.db"
         )
         self.plugins = []
         self.workspace_plugins = []
+        self.owner_plugins = {}
         self.catalog_status = "尚未扫描"
         self.scan_lock = asyncio.Lock()
         self.send_lock = asyncio.Lock()
@@ -77,6 +88,8 @@ class GithookPlugin(Star):
                     lambda: self.plugins,
                     self._refresh_for_webhook,
                     self.wake,
+                    is_repo_enabled=self.repo_enabled,
+                    register_repo=self._register_repository,
                 )
                 app = web.Application(client_max_size=2 * 1024 * 1024)
                 app.router.add_post(self.settings.webhook_path, handler.handle)
@@ -106,6 +119,8 @@ class GithookPlugin(Star):
         owners = sorted(o.casefold() for o in self.settings.owners)
         if self.settings.watch_source == "installed":
             return json.dumps(owners)
+        if self.settings.watch_source == "owner":
+            return json.dumps({"source": "owner", "owners": owners}, sort_keys=True)
         return json.dumps(
             {
                 "source": "workspace",
@@ -116,6 +131,53 @@ class GithookPlugin(Star):
             },
             sort_keys=True,
         )
+
+    def repo_enabled(self, repo):
+        if not self.registry.enabled(repo):
+            return False
+        if self.settings.watch_source == "owner":
+            return plugin_repository(repo, self.settings.owners)
+        return any(p.repo.casefold() == repo.casefold() for p in self.plugins)
+
+    def _enabled_repos(self):
+        return {repo for repo in self.registry.enabled_repos() if self.repo_enabled(repo)}
+
+    async def _refresh_owner(self):
+        for item in self.store.known_plugins():
+            repo = item["repo"]
+            if plugin_repository(repo, self.settings.owners):
+                self.owner_plugins.setdefault(
+                    repo.casefold(), repository_info(repo, item.get("description"))
+                )
+        try:
+            if self.github is None:
+                raise GitHubError("GitHub 客户端尚未初始化")
+            plugins, warnings, stale = await asyncio.wait_for(
+                self.github.owner_catalog(self.settings), WORKSPACE_SCAN_TIMEOUT
+            )
+        except (GitHubError, asyncio.TimeoutError) as exc:
+            reason = str(exc) if isinstance(exc, GitHubError) else "仓库自动发现超时"
+            self.catalog_status = f"{reason}；保留已发现仓库，签名 push 仍可发现新仓库"
+        else:
+            self.owner_plugins.update({p.repo.casefold(): p for p in plugins})
+            self.catalog_status = "已扫描账号下 astrbot_plugin_ 前缀仓库（API 缓存 5 分钟）"
+            if stale:
+                self.catalog_status += "；使用旧缓存，仓库列表可能不完整"
+            if warnings:
+                self.catalog_status += "；" + "；".join(warnings)
+
+    async def _register_repository(self, repo):
+        if self.settings.watch_source != "owner" or not plugin_repository(
+            repo, self.settings.owners
+        ):
+            return None
+        info = self.owner_plugins.setdefault(repo.casefold(), repository_info(repo))
+        self.registry.sync([info])
+        if not any(p.repo.casefold() == repo.casefold() for p in self.plugins):
+            self.plugins.append(info)
+            self.store.sync_plugins(self.plugins, self._scope_key(), self._enabled_repos())
+        self.scan_wake.set()
+        return info
 
     def _workspace_fallback(self):
         cached = self.store.cache_get("workspace-catalog:" + self._scope_key())
@@ -173,6 +235,8 @@ class GithookPlugin(Star):
                 for s in self.context.get_all_stars()
             ]
             settings = self.settings
+            if settings.watch_source == "owner" and not local_only:
+                await self._refresh_owner()
             if settings.watch_source == "workspace":
                 if not local_only:
                     await self._refresh_workspace()
@@ -186,15 +250,30 @@ class GithookPlugin(Star):
             snapshot = await asyncio.to_thread(
                 discover, Path(get_astrbot_plugin_path()), stars, settings
             )
-            if settings.watch_source == "workspace":
+            if settings.watch_source == "owner":
+                installed = {p.repo.casefold(): p for p in snapshot}
+                for p in snapshot:
+                    if plugin_repository(p.repo, settings.owners):
+                        self.owner_plugins.setdefault(p.repo.casefold(), repository_info(p.repo))
+                snapshot = [
+                    replace(installed[p.repo.casefold()], name=p.name)
+                    if p.repo.casefold() in installed
+                    else p
+                    for p in sorted(self.owner_plugins.values(), key=lambda p: p.repo.casefold())
+                    if plugin_repository(p.repo, settings.owners)
+                ]
+            elif settings.watch_source == "workspace":
                 installed = {(p.name, p.repo.casefold()): p for p in snapshot}
                 snapshot = [
                     installed.get((p.name, p.repo.casefold()), p) for p in self.workspace_plugins
                 ]
             else:
                 self.catalog_status = "扫描服务器上已安装的自有插件"
-            self.store.sync_plugins(snapshot, self._scope_key())
             self.plugins = snapshot
+            self.registry.sync(snapshot)
+            enabled = self._enabled_repos()
+            self.store.cancel_disabled_repos(enabled)
+            self.store.sync_plugins(snapshot, self._scope_key(), enabled)
             self.wake.set()
 
     async def _scan_loop(self):
@@ -230,6 +309,9 @@ class GithookPlugin(Star):
             try:
                 for item in self.store.pending():
                     async with self.send_lock:
+                        if not self.repo_enabled(item["repo"]):
+                            self.store.cancel_disabled_repos(self._enabled_repos())
+                            continue
                         if not self.store.enabled(item["umo"]):
                             continue
                         try:
@@ -282,6 +364,8 @@ class GithookPlugin(Star):
                         if text == "开"
                         else "已关闭本群 githook 推送，尚未发送的通知已取消。"
                     )
+                    if text == "开":
+                        answer += "\n仅推送 WebUI 中已勾选的仓库；新发现的仓库默认关闭。"
                     if text == "开" and not self.settings.webhook_secret:
                         answer += (
                             "\nGitHub 更新推送还需在 WebUI 配置 Webhook Secret 并连接 GitHub。"
@@ -294,6 +378,7 @@ class GithookPlugin(Star):
                 answer += (
                     f"\n监听来源：{self.settings.watch_source}\n清单状态：{self.catalog_status}"
                 )
+                answer += f"\n仓库推送：{sum(self.repo_enabled(p.repo) for p in self.plugins)} 个已开启；其余默认关闭"
                 if self.settings.watch_source == "workspace":
                     answer += f"\n工作区：{self.settings.workspace_repo}/{self.settings.workspace_manifest_path}"
                 last = self.store.cache_get("webhook:last")
@@ -314,7 +399,7 @@ class GithookPlugin(Star):
                     if text == "列表":
                         answer = "[githook 受管插件]\n" + (
                             "\n".join(
-                                f"{p.display_name} · {'本机版本' if p.installed else '登记版本'} {p.version} · {p.status}\n  {p.name}"
+                                f"{p.display_name} · {'本机版本' if p.installed else '登记版本'} {p.version} · {p.status}\n  {p.name} · 推送{'开启' if self.repo_enabled(p.repo) else '关闭'}"
                                 for p in self.plugins
                             )
                             or "暂无。请检查监听来源、清单状态、owners 和插件仓库信息。"

@@ -1,8 +1,8 @@
 name: astrbot_plugin_githook
 display_name: githook
-short_desc: 工作区插件更新推送、提交历史与新增提醒。
-desc: 支持已安装插件或工作区规范命名清单两种监听来源，仅由 AstrBot 管理员在群内开启通知，支持跨插件提交历史、日期范围和安装状态查询。
-version: "0.2.0"
+short_desc: 自动发现插件仓库，逐个勾选推送与提交历史。
+desc: 自动发现指定 GitHub 账号下 astrbot_plugin_ 开头的仓库，在 AstrBot 配置中生成默认关闭的逐插件开关，手动勾选后向已开启的群推送，支持提交历史和安装状态查询。
+version: "0.3.0"
 author: Rio
 repo: "https://github.com/RioMaker/astrbot_plugin_githook"
 astrbot_version: ">=4.24.0"

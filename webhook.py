@@ -7,14 +7,18 @@ import re
 
 from aiohttp import web
 
-from .catalog import owned, repo_name
+from .catalog import owned, plugin_repository, repo_name, repository_info
 from .query import clean_title, parse_time
 
 
 class Webhook:
-    def __init__(self, settings, store, get_plugins, refresh, wake):
+    def __init__(
+        self, settings, store, get_plugins, refresh, wake, is_repo_enabled=None, register_repo=None
+    ):
         self.settings, self.store = settings, store
         self.get_plugins, self.refresh, self.wake = get_plugins, refresh, wake
+        self.is_repo_enabled = is_repo_enabled or settings.repo_enabled
+        self.register_repo = register_repo
 
     def response(self, event, repo="", status="ignored", reason="", http_status=200):
         result = {"event": event, "repo": repo, "status": status}
@@ -52,9 +56,13 @@ class Webhook:
         repo = repo_name(repository.get("full_name", ""))
         if not owned(repo, self.settings.owners):
             return self.response(event, repo, reason="owner not managed")
+        if self.settings.watch_source == "owner" and not plugin_repository(
+            repo, self.settings.owners
+        ):
+            return self.response(event, repo, reason="repository prefix not managed")
         await self.refresh()
         plugins = [p for p in self.get_plugins() if p.repo.casefold() == repo.casefold()]
-        if not plugins:
+        if not plugins and self.settings.watch_source != "owner":
             return self.response(event, repo, reason="repository not in watch catalog")
         ref = payload.get("ref", "")
         if not isinstance(ref, str) or not ref.startswith("refs/heads/"):
@@ -82,6 +90,9 @@ class Webhook:
                 )
             except (KeyError, TypeError, ValueError):
                 raise web.HTTPBadRequest(text="invalid commit id or timestamp") from None
+        if not plugins:
+            info = await self.register_repo(repo) if self.register_repo else repository_info(repo)
+            plugins = [info]
         pusher = payload.get("pusher") or {}
         user = clean_title(pusher.get("name", "未知")) if isinstance(pusher, dict) else "未知"
         action = "分支已删除" if payload.get("deleted") else "代码更新"
@@ -104,13 +115,20 @@ class Webhook:
         lines.append(f"https://github.com/{repo}")
         try:
             created = self.store.record_push(
-                "github:" + delivery, hashlib.sha256(body).hexdigest(), "\n".join(lines), commits
+                "github:" + delivery,
+                hashlib.sha256(body).hexdigest(),
+                "\n".join(lines),
+                commits,
+                repo=repo,
+                notify=self.is_repo_enabled(repo),
             )
         except ValueError:
             raise web.HTTPConflict(text="delivery content mismatch") from None
         self.wake.set()
         if not created:
             return self.response(event, repo, reason="duplicate delivery")
+        if not self.is_repo_enabled(repo):
+            return self.response(event, repo, reason="repository disabled")
         return self.response(
             event,
             repo,

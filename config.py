@@ -22,6 +22,26 @@ def mapping(value):
     return {str(k).strip(): str(v).strip() for k, v in value.items()}
 
 
+def repository_switches(value):
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("插件推送开关必须是配置列表")
+    rows, seen = [], set()
+    for item in value:
+        if not isinstance(item, dict) or not isinstance(item.get("enabled", False), bool):
+            raise ValueError("每个插件推送开关须包含仓库和布尔值 enabled")
+        repo = repo_name(item.get("repo", ""))
+        enabled = item.get("enabled", False)
+        if not repo and not str(item.get("repo", "")).strip() and not enabled:
+            continue
+        if not repo:
+            raise ValueError("插件推送开关的仓库须为 GitHub 账号/仓库名")
+        if repo.casefold() in seen:
+            raise ValueError("插件推送开关包含重复仓库")
+        seen.add(repo.casefold())
+        rows.append({"__template_key": "repository", "repo": repo, "enabled": enabled})
+    return rows
+
+
 @dataclass(frozen=True)
 class Settings:
     owners: tuple[str, ...] = ("RioMaker",)
@@ -36,10 +56,17 @@ class Settings:
     webhook_path: str = "/githook/webhook"
     scan_interval: int = 60
     max_push_commits: int = 5
-    watch_source: str = "installed"
+    watch_source: str = "owner"
+    repository_switches: tuple = ()
     workspace_repo: str = "RioMaker/Astrbot_plguin_dev"
     workspace_manifest_path: str = "plugins.json"
     workspace_branch: str = ""
+
+    def repo_enabled(self, repo):
+        return any(
+            item["repo"].casefold() == repo.casefold() and item["enabled"]
+            for item in self.repository_switches
+        )
 
     @classmethod
     def load(cls, config):
@@ -53,6 +80,10 @@ class Settings:
         for key in ("aliases", "repo_overrides"):
             if key in values:
                 values[key] = mapping(values[key])
+        if "repository_switches" in values:
+            values["repository_switches"] = tuple(
+                repository_switches(values["repository_switches"])
+            )
         for key, low, high in (
             ("webhook_port", 1, 65535),
             ("scan_interval", 10, 3600),
@@ -76,8 +107,8 @@ class Settings:
             if key in values:
                 values[key] = str(values[key]).strip()
         result = cls(**values)
-        if result.watch_source not in {"installed", "workspace"}:
-            raise ValueError("watch_source 必须是 installed 或 workspace")
+        if result.watch_source not in {"owner", "installed", "workspace"}:
+            raise ValueError("watch_source 必须是 owner、installed 或 workspace")
         if result.watch_source == "workspace":
             if repo_name(result.workspace_repo) != result.workspace_repo:
                 raise ValueError("workspace_repo 必须是 GitHub 账号/仓库名")

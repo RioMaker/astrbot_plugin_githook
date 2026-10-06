@@ -74,6 +74,17 @@ async def ask(plugin, event, command):
     return "\n".join([part async for part in plugin.command(event, command)])
 
 
+def installed_config(**extra):
+    return {
+        "watch_source": "installed",
+        "repository_switches": [
+            {"repo": "RioMaker/astrbot_plugin_liuyao", "enabled": True},
+            {"repo": "RioMaker/mine", "enabled": True},
+        ],
+        **extra,
+    }
+
+
 def test_greedystr_annotation_has_no_default():
     param = inspect.signature(main.GithookPlugin.command).parameters["content"]
     # AstrBot CommandFilter treats a default value as the argument type and would
@@ -86,7 +97,7 @@ def test_astrbot_admin_only_group_switches_and_queries(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path)
 
     async def run():
-        p = main.GithookPlugin(Context(), {})
+        p = main.GithookPlugin(Context(), installed_config())
         await p.initialize()
         try:
             for role in ("member", "admin", "owner"):
@@ -116,7 +127,7 @@ def test_permission_and_origin_frozen_before_await(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path)
 
     async def run():
-        p = main.GithookPlugin(Context(), {})
+        p = main.GithookPlugin(Context(), installed_config())
         event = Event(admin=True)
         refresh = p.refresh
 
@@ -145,12 +156,16 @@ def test_sender_independent_groups_and_shutdown_frees_port(monkeypatch, tmp_path
             port = probe.getsockname()[1]
         context = Context()
         context.fail.add("two:GroupMessage:1")
-        p = main.GithookPlugin(context, {"webhook_secret": "only-for-tests", "webhook_port": port})
+        p = main.GithookPlugin(
+            context, installed_config(webhook_secret="only-for-tests", webhook_port=port)
+        )
         await p.initialize()
         try:
             p.store.set_enabled("one:GroupMessage:1", True)
             p.store.set_enabled("two:GroupMessage:1", True)
-            p.store.record_push("test", "hash", "notification", [])
+            p.store.record_push(
+                "test", "hash", "notification", [], repo="RioMaker/astrbot_plugin_liuyao"
+            )
             p.wake.set()
             for _ in range(50):
                 if p.store.delivery_counts().get("sent") == 1:
@@ -171,7 +186,7 @@ def test_history_command_forwards_plugin_and_full_range(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path)
 
     async def run():
-        p = main.GithookPlugin(Context(), {})
+        p = main.GithookPlugin(Context(), installed_config())
         calls = []
 
         async def history(plugins, query, branch):
@@ -208,7 +223,7 @@ def test_load_hook_only_announces_new_owned_plugin(monkeypatch, tmp_path):
     root = setup(monkeypatch, tmp_path)
 
     async def run():
-        p = main.GithookPlugin(Context(), {})
+        p = main.GithookPlugin(Context(), installed_config())
         try:
             await p.refresh()
             p.store.set_enabled("one:GroupMessage:1", True)
@@ -247,7 +262,8 @@ def test_port_conflict_cleanup(monkeypatch, tmp_path):
             occupied.bind(("127.0.0.1", 0))
             occupied.listen()
             p = main.GithookPlugin(
-                Context(), {"webhook_secret": "test", "webhook_port": occupied.getsockname()[1]}
+                Context(),
+                installed_config(webhook_secret="test", webhook_port=occupied.getsockname()[1]),
             )
             try:
                 await p.initialize()

@@ -4,7 +4,6 @@ import hmac
 import json
 import time
 from contextlib import asynccontextmanager
-from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import aiohttp
@@ -60,7 +59,14 @@ def push(**updates):
 
 def test_webhook_real_http_signature_filter_dedup_and_queue(store):
     async def run():
-        settings = replace(Settings(), webhook_secret="test-only-secret", branches=("main",))
+        settings = Settings.load(
+            {
+                "watch_source": "installed",
+                "webhook_secret": "test-only-secret",
+                "branches": ["main"],
+                "repository_switches": [{"repo": "RioMaker/liuyao", "enabled": True}],
+            }
+        )
         event = asyncio.Event()
         refreshes = []
 

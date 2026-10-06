@@ -11,7 +11,7 @@ from urllib.parse import quote
 import aiohttp
 import yaml
 
-from .catalog import workspace_candidates, workspace_info
+from .catalog import plugin_repository, repository_info, workspace_candidates, workspace_info
 from .query import BEIJING, clean_title, parse_time
 
 
@@ -44,7 +44,7 @@ class GitHubClient:
                 headers = {
                     "Accept": "application/vnd.github+json",
                     "X-GitHub-Api-Version": "2026-03-10",
-                    "User-Agent": "AstrBot-githook/0.2.0",
+                    "User-Agent": "AstrBot-githook/0.3.0",
                 }
                 if self.token:
                     headers["Authorization"] = "Bearer " + self.token
@@ -120,6 +120,53 @@ class GitHubClient:
             if info:
                 result.append(info)
         return result, stale
+
+    async def repositories(self, path, params=None):
+        rows, stale = [], False
+        for page in range(1, 101):
+            payload, old = await self.get(path, {**(params or {}), "per_page": 100, "page": page})
+            if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
+                raise GitHubError("GitHub 返回了无效的仓库列表")
+            rows.extend(payload)
+            stale |= old
+            if len(payload) < 100:
+                return rows, stale
+        raise GitHubError("仓库列表超过 10000 项，未完成全部扫描")
+
+    async def owner_catalog(self, settings):
+        result, warnings, stale = {}, [], False
+
+        def include(items):
+            for item in items:
+                repo = item.get("full_name", "")
+                if plugin_repository(repo, settings.owners):
+                    info = repository_info(repo, item.get("description"))
+                    result[repo.casefold()] = info
+
+        for owner in dict.fromkeys(settings.owners):
+            try:
+                identity, old = await self.get(f"/users/{quote(owner, safe='')}")
+                if not isinstance(identity, dict) or identity.get("type") not in {
+                    "User",
+                    "Organization",
+                }:
+                    raise GitHubError("GitHub 账号类型无效")
+                group = "orgs" if identity["type"] == "Organization" else "users"
+                items, old_list = await self.repositories(f"/{group}/{quote(owner, safe='')}/repos")
+                stale |= old or old_list
+                include(items)
+            except GitHubError as exc:
+                warnings.append(f"{owner}：{exc}")
+        if self.token:
+            try:
+                items, old = await self.repositories(
+                    "/user/repos", {"affiliation": "owner,organization_member", "visibility": "all"}
+                )
+                stale |= old
+                include(items)
+            except GitHubError as exc:
+                warnings.append(f"Token 可读仓库扫描未完成：{exc}")
+        return sorted(result.values(), key=lambda p: p.repo.casefold()), warnings, stale
 
     async def commits(self, repo, query, branch=""):
         rows, stale = [], False

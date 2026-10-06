@@ -79,6 +79,18 @@ def test_missing_repo_origin_and_override_still_require_owner(tmp_path):
     assert discover(tmp_path, [], settings) == []
 
 
+def test_owner_source_uses_actual_origin_when_metadata_repo_is_outdated(tmp_path):
+    folder = installed(tmp_path, repo="https://github.com/RioMaker/astrbot_plugin_old_name")
+    (folder / ".git").mkdir()
+    (folder / ".git" / "config").write_text(
+        '[remote "origin"]\nurl = https://github.com/RioMaker/astrbot_plugin_liuyao.git\n',
+        encoding="utf-8",
+    )
+    assert discover(tmp_path, [], Settings())[0].repo == "RioMaker/astrbot_plugin_liuyao"
+    settings = replace(Settings(), watch_source="installed")
+    assert discover(tmp_path, [], settings)[0].repo == "RioMaker/astrbot_plugin_old_name"
+
+
 def test_alias_and_ambiguous_names():
     plugins = [plugin(), plugin("liuyao_extra")]
     assert resolve(plugins, "六爻", {"六爻": "astrbot_plugin_liuyao"}) == plugins[0]

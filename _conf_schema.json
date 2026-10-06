@@ -8,9 +8,34 @@
   "watch_source": {
     "description": "插件监听来源",
     "type": "string",
-    "options": ["installed", "workspace"],
-    "default": "installed",
-    "hint": "installed 保留已安装插件模式；workspace 仅监听工作区清单内目录名、仓库名、metadata.name 三者一致的规范命名插件，允许目标插件未安装在本机。修改范围会静默建立基线。"
+    "options": ["owner", "installed", "workspace"],
+    "default": "owner",
+    "hint": "owner 自动发现指定账号下所有 astrbot_plugin_ 开头的仓库，不要求已安装或三者命名一致；每个仓库仍须在下方手动勾选开启。installed 和 workspace 是此前的兼容模式。"
+  },
+  "repository_switches": {
+    "description": "插件推送开关（自动发现，默认关闭）",
+    "type": "template_list",
+    "default": [],
+    "hint": "后台扫描或有效 push 会自动追加新仓库，全部默认不勾选；刷新配置面板即可看到。勾选开启推送并保存后生效。还需在目标群执行 /githook 开。取消勾选会取消该仓库未发送的通知，重新开启不补发。",
+    "templates": {
+      "repository": {
+        "name": "插件仓库",
+        "display_item": "repo",
+        "items": {
+          "repo": {
+            "description": "GitHub 仓库",
+            "type": "string",
+            "default": "",
+            "hint": "自动填写账号/仓库名，用于区分不同账号的同名插件。"
+          },
+          "enabled": {
+            "description": "开启该插件的更新推送",
+            "type": "bool",
+            "default": false
+          }
+        }
+      }
+    }
   },
   "workspace_repo": {
     "description": "工作区基准仓库",
@@ -46,7 +71,7 @@
     "description": "GitHub 只读 Token（可选）",
     "type": "string",
     "default": "",
-    "hint": "公开仓库无需 Token；多个插件查询建议配置以提高额度。workspace 模式访问私有工作区基准仓库需要该仓库 Contents: Read 权限。Token 无需写权限，勿向群内发送。"
+    "hint": "owner 模式发现公开仓库无需 Token；自动发现私有仓库及查询其提交需要 Token 可读目标仓库。仓库列表需要 Metadata: Read，提交历史需要 Contents: Read；无需写权限，勿向群内发送。"
   },
   "history_branch": {
     "description": "历史查询分支",

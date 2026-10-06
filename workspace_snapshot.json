@@ -44,10 +44,10 @@
     {
       "name": "astrbot_plugin_githook",
       "display_name": "githook",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "repo": "RioMaker/astrbot_plugin_githook",
       "status": "远端监听（本机未安装）",
-      "description": "工作区插件更新推送、提交历史与新增提醒。",
+      "description": "自动发现插件仓库，逐个勾选推送与提交历史。",
       "installed": false
     },
     {
