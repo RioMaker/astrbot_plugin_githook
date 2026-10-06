@@ -1,13 +1,17 @@
 """GitHub read API with pagination, bounded caching, and explicit stale results."""
 
 import asyncio
+import base64
+import binascii
 import json
 import time
 from dataclasses import dataclass
 from urllib.parse import quote
 
 import aiohttp
+import yaml
 
+from .catalog import workspace_candidates, workspace_info
 from .query import BEIJING, clean_title, parse_time
 
 
@@ -40,7 +44,7 @@ class GitHubClient:
                 headers = {
                     "Accept": "application/vnd.github+json",
                     "X-GitHub-Api-Version": "2026-03-10",
-                    "User-Agent": "AstrBot-githook/0.1.0",
+                    "User-Agent": "AstrBot-githook/0.2.0",
                 }
                 if self.token:
                     headers["Authorization"] = "Bearer " + self.token
@@ -74,6 +78,48 @@ class GitHubClient:
                 if isinstance(exc, GitHubError):
                     raise
                 raise GitHubError("GitHub 暂时无法访问，请稍后重试") from None
+
+    async def content(self, repo, path, branch=""):
+        params = {"ref": branch} if branch else None
+        payload, stale = await self.get(
+            f"/repos/{quote(repo, safe='/')}/contents/{quote(path, safe='/')}", params
+        )
+        try:
+            if not isinstance(payload, dict) or payload.get("encoding") != "base64":
+                raise ValueError("invalid content encoding")
+            encoded = payload["content"]
+            if not isinstance(encoded, str) or len(encoded) > 2 * 1024 * 1024:
+                raise ValueError("content too large")
+            body = base64.b64decode("".join(encoded.split()), validate=True)
+            if len(body) > 1024 * 1024:
+                raise ValueError("content too large")
+            return body.decode("utf-8-sig"), stale
+        except (KeyError, ValueError, binascii.Error):
+            raise GitHubError("GitHub 文件内容无效或超过 1 MiB") from None
+
+    async def workspace_catalog(self, settings):
+        """Refresh the exact allowlist; never enumerate other repositories of an owner."""
+        body, stale = await self.content(
+            settings.workspace_repo, settings.workspace_manifest_path, settings.workspace_branch
+        )
+        try:
+            candidates = workspace_candidates(json.loads(body), settings.owners)
+        except ValueError as exc:
+            raise GitHubError(f"工作区清单无效：{exc}") from None
+        result = []
+        for entry, repo in candidates:
+            try:
+                # Read the current published metadata, not a local-only pinned migration SHA.
+                body, old = await self.content(repo, "metadata.yaml")
+                if len(body.encode("utf-8")) > 128 * 1024:
+                    raise ValueError("metadata too large")
+                info = workspace_info(entry, repo, yaml.safe_load(body))
+            except (GitHubError, ValueError, yaml.YAMLError) as exc:
+                raise GitHubError(f"无法核对 {repo} 的插件命名：{exc}") from None
+            stale |= old
+            if info:
+                result.append(info)
+        return result, stale
 
     async def commits(self, repo, query, branch=""):
         rows, stale = [], False

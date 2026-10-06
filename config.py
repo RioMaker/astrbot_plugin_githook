@@ -3,6 +3,8 @@
 import json
 from dataclasses import dataclass, field
 
+from .catalog import repo_name
+
 
 def string_list(value):
     if isinstance(value, str):
@@ -34,6 +36,10 @@ class Settings:
     webhook_path: str = "/githook/webhook"
     scan_interval: int = 60
     max_push_commits: int = 5
+    watch_source: str = "installed"
+    workspace_repo: str = "RioMaker/Astrbot_plguin_dev"
+    workspace_manifest_path: str = "plugins.json"
+    workspace_branch: str = ""
 
     @classmethod
     def load(cls, config):
@@ -62,10 +68,24 @@ class Settings:
             "webhook_host",
             "webhook_path",
             "history_branch",
+            "watch_source",
+            "workspace_repo",
+            "workspace_manifest_path",
+            "workspace_branch",
         ):
             if key in values:
                 values[key] = str(values[key]).strip()
         result = cls(**values)
+        if result.watch_source not in {"installed", "workspace"}:
+            raise ValueError("watch_source 必须是 installed 或 workspace")
+        if result.watch_source == "workspace":
+            if repo_name(result.workspace_repo) != result.workspace_repo:
+                raise ValueError("workspace_repo 必须是 GitHub 账号/仓库名")
+            parts = result.workspace_manifest_path.split("/")
+            if any(p in {"", ".", ".."} for p in parts) or any(
+                c in result.workspace_manifest_path for c in "\\?#{}"
+            ):
+                raise ValueError("workspace_manifest_path 必须是仓库内的相对文件路径")
         if not result.webhook_path.startswith("/") or any(c in result.webhook_path for c in "?#{}"):
             raise ValueError("webhook_path 必须是以 / 开头的固定路径")
         return result

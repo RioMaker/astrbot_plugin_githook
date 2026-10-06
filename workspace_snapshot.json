@@ -1,0 +1,90 @@
+{
+  "source": {
+    "repository": "RioMaker/Astrbot_plguin_dev",
+    "path": "plugins.json",
+    "branch": ""
+  },
+  "plugins": [
+    {
+      "name": "astrbot_plugin_access_gate",
+      "display_name": "独立白名单门禁",
+      "version": "1.1.0",
+      "repo": "RioMaker/astrbot_plugin_access_gate",
+      "status": "远端监听（本机未安装）",
+      "description": "分别过滤群聊与私聊，并允许指定私聊指令绕过白名单。",
+      "installed": false
+    },
+    {
+      "name": "astrbot_plugin_analysis",
+      "display_name": "调用汇总分析",
+      "version": "1.1.0",
+      "repo": "RioMaker/astrbot_plugin_analysis",
+      "status": "远端监听（本机未安装）",
+      "description": "记录各群 bot 使用情况，一键生成调用汇总报告与群聊复盘。",
+      "installed": false
+    },
+    {
+      "name": "astrbot_plugin_custom_help",
+      "display_name": "自定义帮助",
+      "version": "1.0.0",
+      "repo": "RioMaker/astrbot_plugin_custom_help",
+      "status": "远端监听（本机未安装）",
+      "description": "替换 AstrBot 默认的 /help 帮助信息。",
+      "installed": false
+    },
+    {
+      "name": "astrbot_plugin_ganzhi",
+      "display_name": "ganzhi · 干支纪时",
+      "version": "0.3.0",
+      "repo": "RioMaker/astrbot_plugin_ganzhi",
+      "status": "远端监听（本机未安装）",
+      "description": "现代东方风格干支图片、阳历生日与日柱绑定、五行流通和十神日运参考，以及默认纯图片的群订阅日报。",
+      "installed": false
+    },
+    {
+      "name": "astrbot_plugin_githook",
+      "display_name": "githook",
+      "version": "0.2.0",
+      "repo": "RioMaker/astrbot_plugin_githook",
+      "status": "远端监听（本机未安装）",
+      "description": "工作区插件更新推送、提交历史与新增提醒。",
+      "installed": false
+    },
+    {
+      "name": "astrbot_plugin_img_gener",
+      "display_name": "GPT Image 2 安全生图",
+      "version": "0.1.21",
+      "repo": "RioMaker/astrbot_plugin_img_gener",
+      "status": "远端监听（本机未安装）",
+      "description": "安全调用 GPT Image 2，支持任务隔离、真实状态、QQ 画像与永久图库。",
+      "installed": false
+    },
+    {
+      "name": "astrbot_plugin_liuyao",
+      "display_name": "六爻起卦",
+      "version": "0.11.2",
+      "repo": "RioMaker/astrbot_plugin_liuyao",
+      "status": "远端监听（本机未安装）",
+      "description": "六爻分类研判，十类学习笔记与三十古籍卦例，Agent 可跨专题查询。",
+      "installed": false
+    },
+    {
+      "name": "astrbot_plugin_think_bubble",
+      "display_name": "think_bubble",
+      "version": "1.2.0",
+      "repo": "RioMaker/astrbot_plugin_think_bubble",
+      "status": "远端监听（本机未安装）",
+      "description": "将指定文字自动排版到普通或可可子思考气泡图片中。",
+      "installed": false
+    },
+    {
+      "name": "astrbot_plugin_welcome_qqgroup",
+      "display_name": "QQ 群入群欢迎",
+      "version": "v1.4.0",
+      "repo": "RioMaker/astrbot_plugin_welcome_qqgroup",
+      "status": "远端监听（本机未安装）",
+      "description": "QQ 群新成员入群自动发送图文欢迎。",
+      "installed": false
+    }
+  ]
+}

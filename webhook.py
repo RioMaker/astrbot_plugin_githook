@@ -16,6 +16,13 @@ class Webhook:
         self.settings, self.store = settings, store
         self.get_plugins, self.refresh, self.wake = get_plugins, refresh, wake
 
+    def response(self, event, repo="", status="ignored", reason="", http_status=200):
+        result = {"event": event, "repo": repo, "status": status}
+        if reason:
+            result["reason"] = reason
+        self.store.cache_put("webhook:last", result)
+        return web.json_response(result, status=http_status)
+
     async def handle(self, request):
         secret = self.settings.webhook_secret
         if not secret:
@@ -33,9 +40,9 @@ class Webhook:
             raise web.HTTPBadRequest(text="JSON object required")
         event = request.headers.get("X-GitHub-Event", "").lower()
         if event == "ping":
-            return web.json_response({"status": "ok", "event": "ping"})
+            return self.response(event, status="ok")
         if event != "push":
-            return web.json_response({"status": "ignored", "reason": "unsupported event"})
+            return self.response(event, reason="unsupported event")
         delivery = request.headers.get("X-GitHub-Delivery", "").strip()
         if not re.fullmatch(r"[A-Za-z0-9-]{1,128}", delivery):
             raise web.HTTPBadRequest(text="valid Delivery ID required")
@@ -44,19 +51,17 @@ class Webhook:
             raise web.HTTPBadRequest(text="repository object required")
         repo = repo_name(repository.get("full_name", ""))
         if not owned(repo, self.settings.owners):
-            return web.json_response({"status": "ignored", "reason": "owner not managed"})
+            return self.response(event, repo, reason="owner not managed")
         await self.refresh()
         plugins = [p for p in self.get_plugins() if p.repo.casefold() == repo.casefold()]
         if not plugins:
-            return web.json_response(
-                {"status": "ignored", "reason": "plugin not installed or not managed"}
-            )
+            return self.response(event, repo, reason="repository not in watch catalog")
         ref = payload.get("ref", "")
         if not isinstance(ref, str) or not ref.startswith("refs/heads/"):
-            return web.json_response({"status": "ignored", "reason": "not a branch push"})
+            return self.response(event, repo, reason="not a branch push")
         branch = ref[len("refs/heads/") :]
         if self.settings.branches and branch not in self.settings.branches:
-            return web.json_response({"status": "ignored", "reason": "branch not allowed"})
+            return self.response(event, repo, reason="branch not allowed")
         raw = payload.get("commits", [])
         if not isinstance(raw, list) or not all(isinstance(c, dict) for c in raw):
             raise web.HTTPBadRequest(text="invalid commits")
@@ -105,7 +110,10 @@ class Webhook:
             raise web.HTTPConflict(text="delivery content mismatch") from None
         self.wake.set()
         if not created:
-            return web.json_response({"status": "ignored", "reason": "duplicate delivery"})
-        return web.json_response(
-            {"status": "queued" if self.store.targets() else "no_subscribers"}, status=202
+            return self.response(event, repo, reason="duplicate delivery")
+        return self.response(
+            event,
+            repo,
+            status="queued" if self.store.targets() else "no_subscribers",
+            http_status=202,
         )

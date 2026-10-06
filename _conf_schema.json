@@ -3,7 +3,32 @@
     "description": "受管 GitHub 用户名或组织名",
     "type": "list",
     "default": ["RioMaker"],
-    "hint": "仅管理已安装且 repo 所属账号在此列表中的插件。不按 author 显示名判断，也不按安装渠道判断。修改后重载。"
+    "hint": "所有监听来源均须通过账号筛选。不按 author 显示名判断，也不按安装渠道判断。修改后重载。"
+  },
+  "watch_source": {
+    "description": "插件监听来源",
+    "type": "string",
+    "options": ["installed", "workspace"],
+    "default": "installed",
+    "hint": "installed 保留已安装插件模式；workspace 仅监听工作区清单内目录名、仓库名、metadata.name 三者一致的规范命名插件，允许目标插件未安装在本机。修改范围会静默建立基线。"
+  },
+  "workspace_repo": {
+    "description": "工作区基准仓库",
+    "type": "string",
+    "default": "RioMaker/Astrbot_plguin_dev",
+    "hint": "仅在 workspace 模式生效，格式为 GitHub 账号/仓库。私有仓库须给 github_token 授予该仓库的 Contents: Read 权限。"
+  },
+  "workspace_manifest_path": {
+    "description": "工作区迁移清单路径",
+    "type": "string",
+    "default": "plugins.json",
+    "hint": "仓库内相对路径。新插件完成提交后按工作区规范更新并推送该清单，githook 通常在 5 分钟缓存到期后的下一次扫描纳入。未推送的本地文件无法被服务器发现。"
+  },
+  "workspace_branch": {
+    "description": "工作区清单分支",
+    "type": "string",
+    "default": "",
+    "hint": "留空使用工作区仓库默认分支。此项与插件推送分支和历史分支独立。"
   },
   "aliases": {
     "description": "插件查询别名（JSON 对象）",
@@ -21,7 +46,7 @@
     "description": "GitHub 只读 Token（可选）",
     "type": "string",
     "default": "",
-    "hint": "公开仓库无需 Token；多个插件的历史查询建议配置以提高额度。私有仓库需要 Contents: Read 权限。勿向群内发送 Token。"
+    "hint": "公开仓库无需 Token；多个插件查询建议配置以提高额度。workspace 模式访问私有工作区基准仓库需要该仓库 Contents: Read 权限。Token 无需写权限，勿向群内发送。"
   },
   "history_branch": {
     "description": "历史查询分支",
@@ -59,7 +84,7 @@
     "default": "/githook/webhook"
   },
   "scan_interval": {
-    "description": "已安装插件复查间隔（秒）",
+    "description": "插件清单复查间隔（秒）",
     "type": "int",
     "default": 60,
     "hint": "10–3600 秒。支持加载事件的 AstrBot 会额外即时唤醒检查。首次扫描建立基线，不广播既有插件。"

@@ -43,9 +43,50 @@ class PluginInfo:
     repo: str
     status: str
     description: str = ""
+    installed: bool = True
 
     def to_dict(self):
         return asdict(self)
+
+
+def workspace_candidates(manifest, owners):
+    """Use exact workspace membership and canonical directory/repository names."""
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        raise ValueError("工作区清单必须采用 schema_version: 1")
+    entries = manifest.get("plugins")
+    if not isinstance(entries, list):
+        raise ValueError("工作区清单缺少 plugins 列表")
+    seen, result = set(), []
+    for entry in entries:
+        if not isinstance(entry, dict) or not isinstance(entry.get("directory"), str):
+            raise ValueError("工作区清单包含无效条目")
+        directory = entry["directory"]
+        if directory in seen:
+            raise ValueError("工作区清单目录重复")
+        seen.add(directory)
+        repo = repo_name(entry.get("url"))
+        if (
+            re.fullmatch(r"astrbot_plugin_[a-z0-9_]+", directory)
+            and owned(repo, owners)
+            and repo.split("/")[-1] == directory
+        ):
+            result.append((entry, repo))
+    return sorted(result, key=lambda item: item[0]["directory"])
+
+
+def workspace_info(entry, repo, metadata):
+    """Metadata name must match the workspace directory and repository exactly."""
+    if not isinstance(metadata, dict) or metadata.get("name") != entry["directory"]:
+        return None
+    return PluginInfo(
+        name=entry["directory"],
+        display_name=str(metadata.get("display_name") or entry["directory"]),
+        version=str(metadata.get("version") or entry.get("version") or "未知"),
+        repo=repo,
+        status="远端监听（本机未安装）",
+        description=str(metadata.get("short_desc") or metadata.get("desc") or ""),
+        installed=False,
+    )
 
 
 def git_origin(folder):
